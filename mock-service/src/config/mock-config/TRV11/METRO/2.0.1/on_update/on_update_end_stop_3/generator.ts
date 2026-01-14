@@ -1,3 +1,4 @@
+import { v4 as uuidV4 } from "uuid";
 export async function onUpdateStopEndGenerator(
   existingPayload: any,
   sessionData: any
@@ -24,16 +25,14 @@ export async function onUpdateStopEndGenerator(
   }
   if (sessionData.payments) {
     existingPayload.message.order.payments = sessionData.payments;
-    const newPayment = {
-      ...existingPayload.message.order.payments[1],
-      status: "PAID",
-      params: {
-        transaction_id: "TXN123456789",
-        amount: existingPayload.message.order.quote.price.value,
-        currency: "INR",
-      },
+    existingPayload.message.order.payments[1].params = {
+      transaction_id: uuidV4(),
+      amount:
+        sessionData?.updated_price ||
+        existingPayload.message.order.quote.price.value,
+      currency: "INR",
     };
-    existingPayload.message.order.payments[1] = newPayment;
+    existingPayload.message.order.payments[1].status = "PAID";
   }
 
   const now = new Date().toISOString();

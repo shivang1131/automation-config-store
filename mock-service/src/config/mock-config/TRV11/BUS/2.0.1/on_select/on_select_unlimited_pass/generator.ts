@@ -1,83 +1,4 @@
 import { SessionData } from "../../../../session-types";
-
-const createQuoteFromItems = (items: any): any => {
-  let totalPrice = 0;
-  const currency = items[0]?.price.currency || "INR";
-
-  const breakup = items.map((item: any) => {
-	const itemTotalPrice =
-	  Number(item.price.value) * item.quantity.selected.count;
-	totalPrice += itemTotalPrice;
-
-	return {
-	  title: "BASE_FARE",
-	  item: {
-		id: item.id,
-		price: {
-		  currency,
-		  value: item.price.value,
-		},
-		quantity: {
-		  selected: {
-			count: item.quantity.selected.count,
-		  },
-		},
-	  },
-	  price: {
-		currency,
-		value: itemTotalPrice.toFixed(2),
-	  },
-	};
-  });
-
-  // Add OFFER and TOLL to breakup
-  breakup.push(
-	{
-	  title: "OFFER",
-	  price: {
-		currency,
-		value: "0",
-	  },
-	},
-	{
-	  title: "TOLL",
-	  price: {
-		currency,
-		value: "0",
-	  },
-	}
-  );
-
-  return {
-	price: {
-	  value: totalPrice.toFixed(2),
-	  currency,
-	},
-	breakup,
-  };
-};
-
-
-function getUniqueFulfillmentIdsAndFilterFulfillments(
-  items: any[],
-  fulfillments: any[]
-): any[] {
-  if (!Array.isArray(fulfillments)) {
-	fulfillments = fulfillments ? [fulfillments] : [];
-  }
-  // Step 1: Get all unique fulfillment IDs from the items
-  const fulfillmentIds = items
-	.flatMap((item) => item.fulfillment_ids) // Flatten the fulfillment_ids arrays
-	.filter((value, index, self) => self.indexOf(value) === index); // Remove duplicates
-
-  // Step 2: Filter the fulfillments based on the unique fulfillment IDs
-  const filteredFulfillments = fulfillments.filter(
-	(fulfillment) => fulfillmentIds.includes(fulfillment.id) // Check if fulfillment.id is in the unique fulfillmentIds list
-  );
-
-  return filteredFulfillments;
-}
-
 const filterItemsBySelectedIds = (
   items: any[],
   selectedIds: string | string[]
@@ -89,38 +10,115 @@ const filterItemsBySelectedIds = (
   return items.filter((item) => idsToFilter.includes(item.id));
 };
 
-export async function onSelectGenerator(
+const createQuoteFromItems = (items: any): any => {
+  let totalPrice = 0;
+  const currency = items[0]?.price?.currency || "INR";
+
+  const breakup = items.map((item: any) => {
+    const itemTotalPrice =
+      Number(item.price?.value || 35) * item.quantity.selected.count;
+    totalPrice += itemTotalPrice;
+
+    return {
+      title: "BASE_FARE",
+      item: {
+        id: item.id,
+        price: {
+          currency,
+          value: String(item.price?.value || 35),
+        },
+        quantity: {
+          selected: {
+            count: item.quantity.selected.count,
+          },
+        },
+      },
+      price: {
+        currency,
+        value: itemTotalPrice.toFixed(2),
+      },
+    };
+  });
+
+  // Add OFFER and TOLL to breakup
+  breakup.push(
+    {
+      title: "OFFER",
+      price: {
+        currency,
+        value: "0",
+      },
+    },
+    {
+      title: "TOLL",
+      price: {
+        currency,
+        value: "0",
+      },
+    }
+  );
+
+  return {
+    price: {
+      value: totalPrice.toFixed(2),
+      currency,
+    },
+    breakup,
+  };
+};
+
+export async function onSelectUnlimitedPassesGenerator(
   existingPayload: any,
   sessionData: SessionData
 ) {
   let items = filterItemsBySelectedIds(
-	sessionData.items,
-	sessionData.selected_item_ids
+    sessionData.items,
+    sessionData.selected_item_ids
   );
-  let fulfillments = getUniqueFulfillmentIdsAndFilterFulfillments(
-	sessionData.items,
-	sessionData.fulfillments
-  );
-  existingPayload.message.order.fulfillments = fulfillments;
   const ids_with_quantities = {
-	items: sessionData.selected_items.reduce((acc: any, item: any) => {
-	  acc[item.id] = item.quantity.selected.count;
-	  return acc;
-	}, {}),
+    items: sessionData.selected_items.reduce((acc: any, item: any) => {
+      acc[item.id] = item.quantity.selected.count;
+      return acc;
+    }, {}),
   };
-  const updatedItems = sessionData.items
-	.map((item: any) => ({
-	  ...item,
-	  quantity: {
-		selected: {
-		  count: ids_with_quantities["items"][item.id] ?? 0, // Default to 0 if not in the mapping
-		},
-	  },
-	}))
-	.filter((item) => item.quantity.selected.count > 0);
-  items = updatedItems;
-  const quote = createQuoteFromItems(updatedItems);
-  existingPayload.message.order.items = items;
+  const updatedItems = items
+    .map((item: any, index: number) => ({
+      ...item,
+      price:
+        existingPayload.message.order.items[index]?.price ||
+        existingPayload.message.order.items[0]?.price,
+      quantity: {
+        selected: {
+          count: ids_with_quantities["items"][item.id] ?? 0, // Default to 0 if not in the mapping
+        },
+      },
+    }))
+    .filter((item) => item.quantity.selected.count > 0);
+  existingPayload.message.order.items = updatedItems
+  existingPayload.message.order.fulfillments = sessionData.fulfillments.map(
+    (fulfillment) => ({
+      ...fulfillment,
+      stops: [
+        {
+          type: "START",
+          location: {
+            descriptor: {
+              code: "std:011",
+            },
+            gps: "28.666576, 77.233332",
+          },
+          id: "1",
+        },
+      ],
+      vehicle: {
+        category: "BUS",
+        variant: "AC",
+      },
+    })
+  );
+
+  const quote = createQuoteFromItems(existingPayload.message.order.items);
   existingPayload.message.order.quote = quote;
+
   return existingPayload;
 }

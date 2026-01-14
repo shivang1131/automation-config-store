@@ -2,11 +2,11 @@ import { SessionData } from "../../../session-types";
 
 const createQuoteFromItems = (items: any): any => {
   let totalPrice = 0;
-  const currency = items[0]?.price.currency || "INR";
+  const currency = items[0]?.price?.currency || "INR";
 
   const breakup = items.map((item: any) => {
     const itemTotalPrice =
-      Number(item.price.value) * item.quantity.selected.count;
+      Number(item.price?.value || 35) * item.quantity.selected.count;
     totalPrice += itemTotalPrice;
 
     return {
@@ -15,7 +15,7 @@ const createQuoteFromItems = (items: any): any => {
         id: item.id,
         price: {
           currency,
-          value: item.price.value,
+          value: item.price?.value || 35,
         },
         quantity: {
           selected: {
@@ -57,55 +57,41 @@ const createQuoteFromItems = (items: any): any => {
   };
 };
 
-function createAndAppendFulfillments(items: any[], fulfillments: any[]): void {
+function createAndAppendFulfillments(items: any[], fulfillments: any[]): any {
   items.forEach((item) => {
-    // item.fulfillment_ids =
-    item.fulfillment_ids.forEach((parentFulfillmentId: string) => {
-      // Get the parent fulfillment object from the fulfillments array
-      const parentFulfillment = fulfillments.find(
-        (f) => f.id === parentFulfillmentId
-      );
-      if (parentFulfillment) {
-        // Get the quantity based on the selected count
-        const quantity = item.quantity.selected.count;
-        for (let i = 0; i < quantity; i++) {
-          // Create new fulfillment object
-          const newFulfillment = {
-            id: `F${Math.random().toString(36).substring(2, 9)}`, // Unique ID for new fulfillment
-            type: "TICKET",
-            stops: [
+    // Ensure item.fulfillment_ids exists
+    if (!item.fulfillment_ids) {
+      item.fulfillment_ids = [];
+    }
+
+    const quantity = item.quantity?.selected?.count || 0;
+
+    for (let i = 0; i < quantity; i++) {
+      // Create new fulfillment object
+      const newFulfillment = {
+        id: `F${Math.random().toString(36).substring(2, 9)}`,
+        type: "TICKET",
+        tags: [
+          {
+            descriptor: { code: "INFO" },
+            list: [
               {
-                authorization: {
-                  type: "QR",
-                },
+                descriptor: { code: "PARENT_ID" },
+                value: "NONE", // since no parent logic needed
               },
             ],
-            tags: [
-              {
-                descriptor: {
-                  code: "INFO",
-                },
-                list: [
-                  {
-                    descriptor: {
-                      code: "PARENT_ID",
-                    },
-                    value: parentFulfillment.id, // Set parent ID
-                  },
-                ],
-              },
-            ],
-          };
+          },
+        ],
+      };
 
-          // Append the new fulfillment to the fulfillments array
-          fulfillments.push(newFulfillment);
+      // Push to fulfillments array
+      fulfillments.push(newFulfillment);
 
-          // Append the new fulfillment's id to the item's fulfillment_ids
-          item.fulfillment_ids.push(newFulfillment.id);
-        }
-      }
-    });
+      // Push new ID to item.fulfillment_ids
+      item.fulfillment_ids.push(newFulfillment.id);
+    }
   });
+  return {items,fulfillments}
 }
 
 function getUniqueFulfillmentIdsAndFilterFulfillments(
@@ -138,7 +124,6 @@ const filterItemsBySelectedIds = (
   // Filter the items array based on the presence of ids in selectedIds
   return items.filter((item) => idsToFilter.includes(item.id));
 };
-
 export async function onSelectGenerator(
   existingPayload: any,
   sessionData: SessionData
@@ -148,7 +133,7 @@ export async function onSelectGenerator(
     sessionData.selected_item_ids
   );
   let fulfillments = getUniqueFulfillmentIdsAndFilterFulfillments(
-    sessionData.items,
+    items,
     sessionData.fulfillments
   );
   const ids_with_quantities = {
@@ -157,9 +142,12 @@ export async function onSelectGenerator(
       return acc;
     }, {}),
   };
-  const updatedItems = sessionData.items
-    .map((item: any) => ({
+  const updatedItems = items
+    .map((item: any, index: number) => ({
       ...item,
+      price:
+        existingPayload.message.order.items[index]?.price ||
+        existingPayload.message.order.items[0]?.price,
       quantity: {
         selected: {
           count: ids_with_quantities["items"][item.id] ?? 0, // Default to 0 if not in the mapping
@@ -167,9 +155,8 @@ export async function onSelectGenerator(
       },
     }))
     .filter((item) => item.quantity.selected.count > 0);
-  items = updatedItems;
-  createAndAppendFulfillments(updatedItems, fulfillments);
-  const quote = createQuoteFromItems(updatedItems);
+  ({ items, fulfillments } = createAndAppendFulfillments(updatedItems, fulfillments));
+  const quote = createQuoteFromItems(items);
   existingPayload.message.order.items = items;
   existingPayload.message.order.fulfillments = fulfillments;
   existingPayload.message.order.fulfillments.forEach((fulfillment: any) => {
